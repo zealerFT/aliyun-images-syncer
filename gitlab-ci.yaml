@@ -1,0 +1,81 @@
+stages:
+  - build
+  - deploy
+  - g-shell-builder
+
+variables:
+  # 请替换自己的镜像仓库
+  REGISTRY: dev-registry-vpc.cn-shanghai.cr.aliyuncs.com
+  # 请替换自己的镜像仓库
+  DEPLOY_REGISTRY: dev-registry-vpc.cn-shanghai.cr.aliyuncs.com
+  DOCKER_NS: algorithm-rls
+  CGO_ENABLED: 0
+
+test-all:
+  stage: build
+  variables:
+    CGO_ENABLED: 0
+    APP_ENVIRONMENT: "test"
+    RSA_PRIVATE_KEY: "$RSA_PRIVATE_KEY"
+  script:
+    - docker-compose -p ${CI_PROJECT_ID}_${CI_CONCURRENT_ID} -f docker-compose-ci.yml run build
+  after_script:
+    - docker-compose -p ${CI_PROJECT_ID}_${CI_CONCURRENT_ID} -f docker-compose-ci.yml down --remove-orphans
+    - sudo chown -R gitlab-runner:gitlab-runner /home/gitlab-runner
+  tags:
+    - docker
+  except:
+    - /^module-*/
+
+build:
+  stage: build
+  script:
+    - docker-compose -p ${CI_PROJECT_ID}_${CI_CONCURRENT_ID} -f docker-compose-ci-build.yml run build
+  after_script:
+    - docker-compose -p ${CI_PROJECT_ID}_${CI_CONCURRENT_ID} -f docker-compose-ci-build.yml down --remove-orphans
+    - sudo chown -R gitlab-runner:gitlab-runner /home/gitlab-runner
+  artifacts:
+    paths:
+      - bin/fermi
+  only:
+    - ci
+    - beta
+    - tags
+    - /^debug-*/
+    - /^deploy-feat-v*/
+    - /^deploy-dev-v*/
+  tags:
+    - docker
+
+.build_script: &build_script
+  - export IMAGE_TAG=${CI_BUILD_TAG:-${CI_BUILD_REF_NAME}-${CI_BUILD_REF:0:8}}
+  - export IMAGE=${REGISTRY}/${DOCKER_NS}/images-sync:${IMAGE_TAG}
+  - export DEPLOY_IMAGE=${DEPLOY_REGISTRY}/${DOCKER_NS}/images-sync:${IMAGE_TAG}
+  - docker build -t ${IMAGE} -f docker/Dockerfile .
+  - docker push ${IMAGE}
+  - echo ${DEPLOY_IMAGE}
+  - docker rmi ${IMAGE}
+
+.deploy_template: &deploy_template
+  stage: deploy
+  script:
+    - *build_script
+  tags:
+    - docker
+
+deploy_production:
+  <<: *deploy_template
+  variables:
+    DOCKER_NS: algorithm-rls
+    # 这里是为了echo出镜像仓库地址，实际部署的时候还是向dev环境push镜像，主从同步服务会自动同步dev到prod，这里面会有5分钟延迟
+    # 请替换自己的镜像仓库
+    DEPLOY_REGISTRY: prod-registry-vpc.cn-shanghai.cr.aliyuncs.com
+    ENV: prod
+    CLUSTER_VERSION: default
+  script:
+    - *build_script
+  only:
+    - tags
+    - refactor
+    - beta
+    - /^deploy-prod-v*/

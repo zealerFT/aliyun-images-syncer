@@ -1,0 +1,16 @@
+version: '3.0'
+
+services:
+  build:
+    image: golang:1.17-rc-alpine3.13
+    environment:
+      GO111MODULE: "on"
+      GOPROXY: "https://mirrors.aliyun.com/goproxy/"
+    command:
+      - /bin/bash
+      - -c
+      - |
+        cd src/images-sync
+        make ci-test
+    volumes:
+      - .:/go/src/images-sync
