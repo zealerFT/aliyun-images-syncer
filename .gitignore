@@ -1,0 +1,7 @@
+.idea
+.vscode
+*.log
+*.conf
+*.json
+bin/
+.DS_Store
