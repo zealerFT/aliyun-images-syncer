@@ -16,6 +16,7 @@ import (
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	console "github.com/alibabacloud-go/tea-console/client"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
+	"github.com/rs/zerolog/log"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
@@ -52,6 +53,9 @@ type Client struct {
 	urlPairListChan            chan int
 	failedTaskListChan         chan int
 	failedTaskGenerateListChan chan int
+
+	// dig
+	Dep *Dependency
 }
 
 // URLPair is a pair of source and destination url
@@ -66,7 +70,7 @@ func CreateClient(accessKeyIdMaster, accessKeySecretMaster, endpointMaster, acco
 	repoNamespaceName, instanceIdMaster, instanceIdSlave *string,
 	publicNetworkMaster, publicNetworkSlave *string,
 	mailHost, mailUserName, mailAuthCode, mailTo string,
-	logFile string, repoNamespaceNames []string) (client *Client, err error) {
+	logFile string, repoNamespaceNames []string, dep *Dependency) (client *Client, err error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -130,6 +134,7 @@ func CreateClient(accessKeyIdMaster, accessKeySecretMaster, endpointMaster, acco
 			repoNamespaceNames,
 			logger,
 		),
+		Dep: dep,
 	}, err
 }
 
@@ -150,12 +155,23 @@ func CreateAliOpenapiClient(ctx context.Context, accessKeyId, accessKeySecret, e
 	return client, nil
 }
 
-func (c *Client) Run() {
-	fmt.Println("Start scanning ...")
+func (c *Client) Run() string {
+	log.Log().Msg("Start scanning ...")
 
+	if _, ok := c.Dep.Lru.Get("syncing"); ok {
+		log.Log().Msg("Syncing, please wait ...")
+		return "Some images is syncing, please wait ..."
+	}
+	c.Dep.Lru.Add("syncing", 1)
+
+	// time.Sleep(5 * time.Second)
 	for _, ns := range c.alibabacloudApi.RepoNamespaceNames {
 		c.Sync(ns)
 	}
+
+	c.Dep.Lru.Remove("syncing")
+	log.Log().Msg("End scanning ...")
+	return "success"
 }
 func (c *Client) Sync(ns string) {
 	fmt.Printf("Start scanning the difference between master and slave images ...,namespance is %s\n", ns)
